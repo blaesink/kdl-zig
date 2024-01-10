@@ -3,20 +3,43 @@ const std = @import("std");
 
 pub const Token = union(enum) {
     ident: []const u8,
-    // num: []const u8,
 
     // Special tokens
     equals,
-    semicolon,
     lcurly,
     rcurly,
     lparen,
     rparen,
     backslash,
 
+    // "Node terminators"
+    semicolon,
+    endl, // Note that CRLF is treated as a single newline.
+    // eof, // Handled via `null` by the end of the lexing instead.
+
     // Bad things
     illegal, // In case something is invalid or a keyword.
 };
+
+/// A modification of `std.ascii.isWhiteSpace`, just to omit `\r` and `\n`, so that they can be
+/// handled separately.
+fn isWhitespace(c: u8) bool {
+    const whitespace = [_]u8{ ' ', '\t', std.ascii.control_code.vt, std.ascii.control_code.ff };
+
+    return for (whitespace) |other| {
+        if (c == other)
+            break true;
+    } else false;
+}
+
+fn isEndLine(c: u8) bool {
+    const endline = [_]u8{ std.ascii.control_code.cr, std.ascii.control_code.lf };
+
+    return for (endline) |e| {
+        if (c == e)
+            break true;
+    } else false;
+}
 
 pub const Lexer = struct {
     read_position: usize = 0,
@@ -34,9 +57,8 @@ pub const Lexer = struct {
     }
 
     fn skipWhitespace(self: *Self) void {
-        while (std.ascii.isWhitespace(self.current_char)) {
+        while (isWhitespace(self.current_char))
             self.advanceChar();
-        }
     }
 
     fn peek(self: Self) u8 {
@@ -77,6 +99,12 @@ pub const Lexer = struct {
         return self.input[start_position..self.position];
     }
 
+    /// Move forward in the charstream until we're not an endline char.
+    fn advanceToNextLine(self: *Self) void {
+        while (isEndLine(self.current_char))
+            self.advanceChar();
+    }
+
     pub fn nextToken(self: *Self) ?Token {
         self.skipWhitespace();
 
@@ -89,6 +117,10 @@ pub const Lexer = struct {
             '(' => .lparen,
             ')' => .rparen,
             '\\' => .backslash,
+            '\r', '\n' => blk: {
+                self.advanceToNextLine();
+                break :blk .endl;
+            },
             else => null,
         };
         self.advanceChar();
@@ -98,6 +130,7 @@ pub const Lexer = struct {
 
     pub fn collectAllAlloc(self: *Self, allocator: std.mem.Allocator) ![]Token {
         var tokens = std.ArrayList(Token).init(allocator);
+        errdefer tokens.deinit();
 
         while (self.nextToken()) |token| {
             try tokens.append(token);
@@ -158,6 +191,7 @@ test "Multiline node" {
         .{ .ident = "5" },
         .{ .ident = "6" },
         .backslash,
+        .endl,
         .{ .ident = "7" },
         .{ .ident = "8" },
     };
@@ -177,12 +211,15 @@ test "Multiple multiline nodes" {
         .{ .ident = "5" },
         .{ .ident = "6" },
         .backslash,
+        .endl,
         .{ .ident = "7" },
         .{ .ident = "8" },
+        .endl,
         .{ .ident = "letters" },
         .{ .ident = "a" },
         .{ .ident = "b" },
         .backslash,
+        .endl,
         .{ .ident = "c" },
         .{ .ident = "d" },
         .semicolon, // Just to check it.
