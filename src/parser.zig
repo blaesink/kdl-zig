@@ -7,6 +7,7 @@ const Lexer = lexer.Lexer;
 
 const node = @import("node.zig");
 const Node = node.Node;
+const NodeType = node.NodeType;
 const NodePropArg = node.NodePropArg;
 
 const ParserError = error{
@@ -56,6 +57,7 @@ pub const Parser = struct {
         };
     }
 
+    /// Look at the next token (if not at end of stream).
     fn peek(self: Self) ?Token {
         if (self.read_position >= self.tokens.len)
             return null;
@@ -63,8 +65,9 @@ pub const Parser = struct {
         return self.tokens[self.read_position];
     }
 
-    fn peekN(self: Self, n: u8) ?[]const Token {
-        if (self.read_position >= self.tokens.len and self.read_position + n >= self.tokens.len)
+    /// Look at the next `n` tokens (if not at end of stream).
+    fn peekN(self: Self, n: usize) ?[]const Token {
+        if (self.read_position > self.tokens.len or self.read_position + n > self.tokens.len)
             return null;
 
         return self.tokens[self.read_position .. self.read_position + n];
@@ -79,11 +82,10 @@ pub const Parser = struct {
         self.read_position += 1;
     }
 
-    fn buildTypeAnnotation(self: *Self) ParserError!node.NodeType {
+    fn buildTypeAnnotation(self: *Self) ParserError!NodeType {
         // Check forward 2 tokens, they should be <type> <.rparen>
         if (self.peekN(2)) |tokens| {
             if (!utils.sliceContainsEnumVariant(Token, tokens, .rparen) or tokens[0] == .rparen) {
-                std.debug.print("{any}\n", .{tokens});
                 return ParserError.InvalidSyntax;
             }
 
@@ -91,8 +93,13 @@ pub const Parser = struct {
             self.position += 2;
             self.read_position += 2;
 
-            if (std.meta.stringToEnum(node.NodeType, tokens[0].ident)) |annot|
-                return annot;
+            return switch (tokens[0]) {
+                .ident => |i| blk: {
+                    if (std.meta.stringToEnum(NodeType, i)) |annot|
+                        break :blk annot;
+                },
+                else => ParserError.InvalidSyntax,
+            };
         }
         return ParserError.InvalidSyntax;
     }
@@ -171,14 +178,12 @@ pub const Parser = struct {
 };
 
 test "buildTypeAnnotation" {
-    const input = "(u8)";
-    var lex = Lexer.init(input);
-    const tokens = try lex.collectAllAlloc(testing.allocator);
+    const tokens = try lexer.lexFromLine("(u8)", testing.allocator);
     defer testing.allocator.free(tokens);
 
     var parser = Parser.init(tokens);
 
-    const expected = node.NodeType.u8;
+    const expected = NodeType.u8;
     const actual = try parser.buildTypeAnnotation();
 
     try testing.expectEqual(expected, actual);
@@ -215,23 +220,42 @@ test "buildTypeAnnotation" {
 // }
 
 test "peekN" {
-    const input = "person Zevin 33 tall dark handsome";
+    {
+        const input = "person Zevin 33 tall dark handsome";
 
-    var lex = Lexer.init(input);
-    const tokens = try lex.collectAllAlloc(testing.allocator);
-    defer testing.allocator.free(tokens);
+        var lex = Lexer.init(input);
+        const tokens = try lex.collectAllAlloc(testing.allocator);
+        defer testing.allocator.free(tokens);
 
-    var parser = Parser.init(tokens);
+        var parser = Parser.init(tokens);
 
-    const expected = [_]Token{
-        .{ .ident = "Zevin" },
-        .{ .ident = "33" },
-    };
+        const expected = [_]Token{
+            .{ .ident = "Zevin" },
+            .{ .ident = "33" },
+        };
 
-    const actual = parser.peekN(2).?;
+        const actual = parser.peekN(2).?;
 
-    for (&expected, actual) |e, a|
-        try testing.expectEqualDeep(e, a);
+        for (&expected, actual) |e, a|
+            try testing.expectEqualDeep(e, a);
 
-    try testing.expectError(error.InvalidSyntax, parser.buildTypeAnnotation());
+        try testing.expectError(error.InvalidSyntax, parser.buildTypeAnnotation());
+    }
+    // {
+    //     const tokens = try lexer.lexFromLine("(u8)", testing.allocator);
+    //     defer testing.allocator.free(tokens);
+
+    //     var p = Parser.init(tokens);
+
+    //     const expected = [_]Token{
+    //         .{ .ident = "u8" },
+    //         .rparen,
+    //     };
+
+    //     const actual = p.peekN(2).?;
+    //     std.debug.print("{any}\n", .{actual});
+
+    //     for (&expected, actual) |e, a|
+    //         try testing.expectEqualDeep(e, a);
+    // }
 }

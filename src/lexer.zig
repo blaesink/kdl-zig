@@ -1,6 +1,13 @@
 //! KDL grammar lexer
 const std = @import("std");
 
+/// *Caller owns returned memory!*
+pub fn lexFromLine(input: []const u8, allocator: std.mem.Allocator) ![]Token {
+    var lex = Lexer.init(input);
+
+    return try lex.collectAllAlloc(allocator);
+}
+
 pub const Token = union(enum) {
     ident: []const u8,
 
@@ -230,5 +237,18 @@ test "Multiple multiline nodes" {
     defer std.testing.allocator.free(actual);
 
     for (expected, actual) |e, a|
+        try std.testing.expectEqualDeep(e, a);
+}
+
+test "lexFromLine" {
+    var input = "age 2";
+    var actual = try lexFromLine(input, std.testing.allocator);
+    var expected = [_]Token{
+        .{ .ident = "age" },
+        .{ .ident = "2" },
+    };
+    defer std.testing.allocator.free(actual);
+
+    for (&expected, actual) |e, a|
         try std.testing.expectEqualDeep(e, a);
 }
